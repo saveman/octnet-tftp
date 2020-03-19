@@ -1,5 +1,7 @@
+#include "server.hpp"
 
-int main(int argc, char* argv[])
+int main(int /*argc*/, char* /*argv*/[])
 {
-    return 0;
+    oct::net::tftp::server server;
+    return server.run();
 }
