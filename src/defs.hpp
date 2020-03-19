@@ -28,11 +28,13 @@ const std::uint16_t DEFAULT_TFTP_PORT = 69;
 
 const std::size_t MAX_PACKET_SIZE = 4096;
 
-const std::size_t DEFAULT_BLOCK_SIZE = 512;
+const std::size_t DEFAULT_DATA_SIZE = 512;
 
 const int DEFAULT_RETRY_TIMEOUT_SEC = 1;
 
 const int DEFAULT_RETRY_COUNTER = 5;
+
+const std::size_t MAX_RECV_PACKET_SIZE = 1024;
 
 } // namespace tftp
 } // namespace net

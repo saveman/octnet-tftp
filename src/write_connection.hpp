@@ -23,10 +23,10 @@ namespace net
 namespace tftp
 {
 
-class read_connection : public connection
+class write_connection : public connection
 {
 public:
-    read_connection(request_handler& handler, asio::io_context& io_context,
+    write_connection(request_handler& handler, asio::io_context& io_context,
         std::shared_ptr<const server_settings> settings, std::shared_ptr<const packet_file_req> request_packet,
         const asio::ip::udp::endpoint& requesting_endpoint)
         : m_handler(handler)
@@ -35,9 +35,8 @@ public:
         , m_settings(settings)
         , m_request_packet(request_packet)
         , m_client_endpoint(requesting_endpoint)
-        , m_reader()
-        , m_last_packet_sent(false)
-        , m_last_sent_packet_id(0)
+        , m_writer()
+        , m_next_expected_packet_id(0)
         , m_response_expected(false)
         , m_retry_counter(0)
     {
@@ -60,8 +59,8 @@ public:
             path += '/';
             path += m_request_packet->m_filename;
 
-            m_reader = stdext::make_unique<file_reader>(path);
-            if (!m_reader->is_open())
+            m_writer = stdext::make_unique<file_writer>(path);
+            if (!m_writer->is_open())
             {
                 std::cerr << "File not found: " << path << std::endl;
             }
@@ -95,7 +94,7 @@ private:
 
     void send_first_packet()
     {
-        if (!m_reader)
+        if (!m_writer)
         {
             packet_error packet;
             packet.m_op = OP_ERROR;
@@ -104,7 +103,7 @@ private:
 
             send_packet(packet, false, 0);
         }
-        else if (!m_reader->is_open())
+        else if (!m_writer->is_open())
         {
             packet_error packet;
             packet.m_op = OP_ERROR;
@@ -115,8 +114,21 @@ private:
         }
         else
         {
-            send_next_data_packet();
+            send_ack(0, false);
         }
+    }
+
+    void send_ack(std::uint32_t block_no, bool is_last)
+    {
+        std::cout << "Sending ACK: " << block_no << ' ' << is_last << std::endl;
+
+        packet_ack packet;
+        packet.m_op = OP_ACK;
+        packet.m_block_no = block_no;
+
+        m_next_expected_packet_id = block_no + 1;
+
+        send_packet(packet, !is_last, DEFAULT_RETRY_COUNTER);
     }
 
     template <class packet_T>
@@ -133,50 +145,15 @@ private:
     {
         m_connection_socket.async_send_to(asio::const_buffer(m_out_packet_data.data(), m_out_packet_data.size()),
             m_client_endpoint,
-            std::bind(&read_connection::on_packet_sent, shared_from_base<read_connection>(), std::placeholders::_1,
+            std::bind(&write_connection::on_packet_sent, shared_from_base<write_connection>(), std::placeholders::_1,
                 std::placeholders::_2));
-    }
-
-    void send_next_data_packet()
-    {
-        std::size_t bytes_read = 0;
-
-        packet_data packet;
-        packet.m_op = OP_DATA;
-        packet.m_block_no = ++m_last_sent_packet_id;
-        packet.m_data.resize(DEFAULT_DATA_SIZE);
-
-        if (!m_reader->read(packet.m_data.data(), packet.m_data.size(), bytes_read))
-        {
-            std::cerr << "Read failed" << std::endl;
-
-            packet_error packet;
-            packet.m_op = OP_ERROR;
-            packet.m_error_code = ERRCODE_FILE_NOT_FOUND;
-            packet.m_error_message = "invalid path";
-
-            send_packet(packet, false, 0);
-
-            return;
-        }
-
-        std::cout << "Bytes read: " << bytes_read << std::endl;
-
-        packet.m_data.resize(bytes_read, 0);
-
-        if (bytes_read < DEFAULT_DATA_SIZE)
-        {
-            m_last_packet_sent = true;
-        }
-
-        send_packet(packet, true, DEFAULT_RETRY_COUNTER);
     }
 
     void request_next_receive()
     {
         m_connection_socket.async_receive_from(asio::buffer(m_in_packet_data), m_received_packet_endpoint,
-            std::bind(&read_connection::on_packet_received, shared_from_base<read_connection>(), std::placeholders::_1,
-                std::placeholders::_2));
+            std::bind(&write_connection::on_packet_received, shared_from_base<write_connection>(),
+                std::placeholders::_1, std::placeholders::_2));
     }
 
     void on_packet_sent(const asio::error_code& ec, std::size_t bytes_transferred)
@@ -200,7 +177,7 @@ private:
         {
             m_send_timeout_timer.expires_after(std::chrono::seconds(DEFAULT_RETRY_TIMEOUT_SEC));
             m_send_timeout_timer.async_wait(std::bind(
-                &read_connection::on_send_timeout, shared_from_base<read_connection>(), std::placeholders::_1));
+                &write_connection::on_send_timeout, shared_from_base<write_connection>(), std::placeholders::_1));
             request_next_receive();
         }
         else
@@ -234,25 +211,50 @@ private:
         }
     }
 
-    void process_ack_received(std::shared_ptr<packet_ack> packet)
+    void process_data_received(std::shared_ptr<packet_data> packet)
     {
-        std::cout << "ACK received: " << packet->m_block_no << std::endl;
+        std::cout << "Data received: " << packet->m_block_no << std::endl;
 
-        if (packet->m_block_no != m_last_sent_packet_id)
+        if (packet->m_block_no != m_next_expected_packet_id)
         {
-            std::cerr << "ACK with bad block no received: " << packet->m_block_no << std::endl;
+            std::cerr << "Data with bad block no received: " << packet->m_block_no
+                      << "; expected: " << m_next_expected_packet_id << std::endl;
             return;
         }
 
         m_send_timeout_timer.cancel();
 
-        if (m_last_packet_sent)
+        if (packet->m_data.size() > 0)
         {
-            terminate();
-            return;
+            if (!m_writer->write(packet->m_data.data(), packet->m_data.size()))
+            {
+                std::cerr << "Write failed" << std::endl;
+
+                packet_error packet;
+                packet.m_op = OP_ERROR;
+                packet.m_error_code = ERRCODE_FILE_NOT_FOUND;
+                packet.m_error_message = "invalid path";
+
+                send_packet(packet, false, 0);
+
+                return;
+            }
         }
 
-        send_next_data_packet();
+        if (packet->m_data.size() == DEFAULT_DATA_SIZE)
+        {
+            send_ack(packet->m_block_no, false);
+        }
+        else
+        {
+            send_ack(packet->m_block_no, true);
+            // TODO: dallying:
+            //   The host acknowledging the final DATA packet may terminate its side
+            //   of the connection on sending the final ACK.  On the other hand,
+            //   dallying is encouraged.  This means that the host sending the final
+            //   ACK will wait for a while before terminating in order to retransmit
+            //   the final ACK if it has been lost.
+        }
     }
 
     void process_error_received(std::shared_ptr<packet_error> packet)
@@ -293,8 +295,8 @@ private:
 
         switch (packet->m_op)
         {
-        case OP_ACK:
-            process_ack_received(std::static_pointer_cast<packet_ack>(packet));
+        case OP_DATA:
+            process_data_received(std::static_pointer_cast<packet_data>(packet));
             return;
 
         case OP_ERROR:
@@ -309,7 +311,7 @@ private:
 
     void terminate()
     {
-        m_handler.connection_terminated(shared_from_base<read_connection>());
+        m_handler.connection_terminated(shared_from_base<write_connection>());
     }
 
     request_handler& m_handler;
@@ -321,10 +323,9 @@ private:
 
     const asio::ip::udp::endpoint m_client_endpoint;
 
-    std::unique_ptr<file_reader> m_reader;
-    bool m_last_packet_sent;
+    std::unique_ptr<file_writer> m_writer;
 
-    std::uint16_t m_last_sent_packet_id;
+    std::uint16_t m_next_expected_packet_id;
 
     asio::ip::udp::endpoint m_received_packet_endpoint;
 

@@ -66,7 +66,6 @@ private:
     {
         std::cout << "Packet received with " << buffer.size() << " bytes" << std::endl;
         std::cout << "Sender: " << m_packet_sender_endpoint << std::endl;
-        std::cout << "Bytes:";
 
         auto packet = packet_parser::parse_packet(buffer);
         if (packet)

@@ -11,6 +11,7 @@
 #include "request_handler.hpp"
 #include "server_acceptor.hpp"
 #include "server_settings.hpp"
+#include "write_connection.hpp"
 
 namespace oct
 {
@@ -62,24 +63,43 @@ private:
         }
     }
 
-    void handle_server_packet(std::shared_ptr<packet> packet, const asio::ip::udp::endpoint& send_endpoint) final
+    void handle_rrq_packet(std::shared_ptr<packet_file_req> packet, const asio::ip::udp::endpoint& client_endpoint)
+    {
+        request_handler& handler = *this;
+
+        auto new_connection
+            = std::make_shared<read_connection>(handler, m_io_context, m_settings, packet, client_endpoint);
+
+        connection_created(new_connection);
+    }
+
+    void handle_wrq_packet(std::shared_ptr<packet_file_req> packet, const asio::ip::udp::endpoint& client_endpoint)
+    {
+        request_handler& handler = *this;
+
+        auto new_connection
+            = std::make_shared<write_connection>(handler, m_io_context, m_settings, packet, client_endpoint);
+
+        connection_created(new_connection);
+    }
+
+    void handle_server_packet(std::shared_ptr<packet> packet, const asio::ip::udp::endpoint& client_endpoint) final
     {
         try
         {
-            if (packet->m_op == OP_RRQ)
+            switch (packet->m_op)
             {
-                auto req_packet = std::static_pointer_cast<packet_file_req>(packet);
+            case OP_RRQ:
+                handle_rrq_packet(std::static_pointer_cast<packet_file_req>(packet), client_endpoint);
+                break;
 
-                request_handler& handler = *this;
+            case OP_WRQ:
+                handle_wrq_packet(std::static_pointer_cast<packet_file_req>(packet), client_endpoint);
+                break;
 
-                auto new_connection
-                    = std::make_shared<read_connection>(handler, m_io_context, m_settings, req_packet, send_endpoint);
-
-                connection_created(new_connection);
-            }
-            else
-            {
+            default:
                 std::cerr << "Unsupported packet type: " << packet->m_op << std::endl;
+                break;
             }
         }
         catch (const std::exception& e)
@@ -88,7 +108,7 @@ private:
         }
     }
 
-    void connection_created(std::shared_ptr<read_connection> connection)
+    void connection_created(std::shared_ptr<connection> connection)
     {
         std::cout << "Connection created: " << connection.get() << std::endl;
 
@@ -97,7 +117,7 @@ private:
         connection->start();
     }
 
-    void connection_terminated(std::shared_ptr<read_connection> connection) final
+    void connection_terminated(std::shared_ptr<connection> connection) final
     {
         std::cout << "Connection terminated: " << connection.get() << std::endl;
 
@@ -118,7 +138,7 @@ private:
     asio::io_context m_io_context;
 
     std::unique_ptr<server_acceptor> m_acceptor;
-    std::set<std::shared_ptr<read_connection>> m_connections;
+    std::set<std::shared_ptr<connection>> m_connections;
 };
 
 } // namespace tftp

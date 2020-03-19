@@ -82,6 +82,18 @@ public:
 
         return buffer;
     }
+
+    static std::vector<std::uint8_t> build_packet(const packet_ack& packet)
+    {
+        std::vector<std::uint8_t> buffer;
+
+        serializer serializer(buffer);
+
+        serializer.write_uint16(packet.m_op);
+        serializer.write_uint16(packet.m_block_no);
+
+        return buffer;
+    }
 };
 
 } // namespace tftp
