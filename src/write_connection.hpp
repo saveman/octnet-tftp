@@ -212,8 +212,8 @@ private:
 
                 packet_error packet;
                 packet.m_op = OP_ERROR;
-                packet.m_error_code = ERRCODE_FILE_NOT_FOUND;
-                packet.m_error_message = "invalid path";
+                packet.m_error_code = ERRCODE_DISK_FULL;
+                packet.m_error_message = "write failed";
 
                 send_packet(packet, false, 0);
 

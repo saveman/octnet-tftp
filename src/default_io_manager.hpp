@@ -5,6 +5,7 @@
 #include "file_io.hpp"
 #include "io_manager.hpp"
 #include "make_unique.hpp"
+#include "netascii_io.hpp"
 #include "string_utils.hpp"
 
 namespace oct
@@ -101,7 +102,7 @@ private:
     }
 
     const std::string& m_root_path;
-}; // namespace tftp
+};
 
 } // namespace tftp
 } // namespace net

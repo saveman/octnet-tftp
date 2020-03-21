@@ -84,15 +84,28 @@ public:
             return false;
         }
 
-        bytes_read = std::fread(buffer, 1, buffer_size, m_file_wrapper.get_handle());
-        if (bytes_read < buffer_size)
+        if (buffer_size == 1)
         {
-            if (std::ferror(m_file_wrapper.get_handle()))
+            auto c = std::fgetc(m_file_wrapper.get_handle());
+            if (c != EOF)
             {
-                return false;
+                *(reinterpret_cast<char*>(buffer)) = static_cast<char>(c);
+                bytes_read = 1;
+            }
+            else
+            {
+                bytes_read = 0;
             }
         }
+        else
+        {
+            bytes_read = std::fread(buffer, 1, buffer_size, m_file_wrapper.get_handle());
+        }
 
+        if (std::ferror(m_file_wrapper.get_handle()))
+        {
+            return false;
+        }
         return true;
     }
 
@@ -136,92 +149,6 @@ public:
 
 private:
     file_wrapper m_file_wrapper;
-};
-
-class netascii_reader : public reader
-{
-public:
-    netascii_reader(std::unique_ptr<reader> peer_reader)
-        : m_peer_reader(std::move(peer_reader))
-    {
-        // noop
-    }
-
-    bool close() final
-    {
-        return m_peer_reader->close();
-    }
-
-    bool is_open() const final
-    {
-        return m_peer_reader->is_open();
-    }
-
-    bool read(void* buffer, const std::size_t buffer_size, std::size_t& bytes_read) final
-    {
-        return false;
-#if 0
-        if (!m_file_wrapper.is_open())
-        {
-            return false;
-        }
-
-        bytes_read = std::fread(buffer, 1, buffer_size, m_file_wrapper.get_handle());
-        if (bytes_read < buffer_size)
-        {
-            if (std::ferror(m_file_wrapper.get_handle()))
-            {
-                return false;
-            }
-        }
-
-        return true;
-#endif
-    }
-
-private:
-    std::unique_ptr<reader> m_peer_reader;
-};
-
-class netascii_writer : public writer
-{
-public:
-    netascii_writer(std::unique_ptr<writer> peer_writer)
-        : m_peer_writer(std::move(peer_writer))
-    {
-        // noop
-    }
-
-    bool close() final
-    {
-        return m_peer_writer->close();
-    }
-
-    bool is_open() const final
-    {
-        return m_peer_writer->is_open();
-    }
-
-    bool write(const void* buffer, const std::size_t bytes_count) final
-    {
-        return false;
-#if 0
-        if (!m_file_wrapper.is_open())
-        {
-            return false;
-        }
-
-        if (std::fwrite(buffer, 1, bytes_count, m_file_wrapper.get_handle()) != bytes_count)
-        {
-            return false;
-        }
-
-        return true;
-#endif
-    }
-
-private:
-    std::unique_ptr<writer> m_peer_writer;
 };
 
 } // namespace tftp

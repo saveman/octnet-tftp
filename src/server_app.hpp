@@ -57,6 +57,7 @@ private:
 
         if (signal_number == SIGTERM)
         {
+            std::cout << "Terminate requested" << std::endl;
             m_io_context.stop();
         }
         else
