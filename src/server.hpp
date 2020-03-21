@@ -6,6 +6,7 @@
 
 #include <asio.hpp>
 
+#include "default_io_manager.hpp"
 #include "make_unique.hpp"
 #include "read_connection.hpp"
 #include "request_handler.hpp"
@@ -23,62 +24,38 @@ namespace tftp
 class server : private request_handler
 {
 public:
-    server()
-        : m_io_context()
+    server(asio::io_context& io_context, server_settings& settings, io_manager& io_manager)
+        : m_io_context(io_context)
+        , m_settings(settings)
+        , m_io_manager(io_manager)
+        , m_acceptor(stdext::make_unique<server_acceptor>(m_io_context, get_handler()))
     {
-        m_settings = std::make_shared<server_settings>();
-        m_settings->m_server_port = 6969;
-        m_settings->m_root_path = "testdata";
+        // noop
     }
 
-    int run()
+    void start()
     {
-        try
-        {
-            start();
-
-            m_io_context.run();
-
-            return EXIT_SUCCESS;
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << e.what() << std::endl;
-            return EXIT_FAILURE;
-        }
+        m_acceptor->start(m_settings.m_server_port);
     }
 
 private:
-    void start()
+    request_handler& get_handler()
     {
-        try
-        {
-            request_handler& handler = *this;
-            m_acceptor = stdext::make_unique<server_acceptor>(m_io_context, handler);
-            m_acceptor->start(m_settings->m_server_port);
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << "Start failed: " << e.what() << std::endl;
-        }
+        return *this;
     }
 
     void handle_rrq_packet(std::shared_ptr<packet_file_req> packet, const asio::ip::udp::endpoint& client_endpoint)
     {
-        request_handler& handler = *this;
-
         auto new_connection
-            = std::make_shared<read_connection>(handler, m_io_context, m_settings, packet, client_endpoint);
+            = std::make_shared<read_connection>(get_handler(), m_io_manager, m_io_context, packet, client_endpoint);
 
         connection_created(new_connection);
     }
 
     void handle_wrq_packet(std::shared_ptr<packet_file_req> packet, const asio::ip::udp::endpoint& client_endpoint)
     {
-        request_handler& handler = *this;
-
         auto new_connection
-            = std::make_shared<write_connection>(handler, m_io_context, m_settings, packet, client_endpoint);
+            = std::make_shared<write_connection>(get_handler(), m_io_manager, m_io_context, packet, client_endpoint);
 
         connection_created(new_connection);
     }
@@ -134,8 +111,9 @@ private:
         }
     }
 
-    std::shared_ptr<server_settings> m_settings;
-    asio::io_context m_io_context;
+    asio::io_context& m_io_context;
+    server_settings& m_settings;
+    io_manager& m_io_manager;
 
     std::unique_ptr<server_acceptor> m_acceptor;
     std::set<std::shared_ptr<connection>> m_connections;

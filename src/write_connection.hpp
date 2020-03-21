@@ -8,7 +8,7 @@
 
 #include "connection.hpp"
 #include "defs.hpp"
-#include "file.hpp"
+#include "file_io.hpp"
 #include "make_unique.hpp"
 #include "packet.hpp"
 #include "packet_builder.hpp"
@@ -26,13 +26,12 @@ namespace tftp
 class write_connection : public connection
 {
 public:
-    write_connection(request_handler& handler, asio::io_context& io_context,
-        std::shared_ptr<const server_settings> settings, std::shared_ptr<const packet_file_req> request_packet,
-        const asio::ip::udp::endpoint& requesting_endpoint)
+    write_connection(request_handler& handler, io_manager& io_manager, asio::io_context& io_context,
+        std::shared_ptr<const packet_file_req> request_packet, const asio::ip::udp::endpoint& requesting_endpoint)
         : m_handler(handler)
+        , m_io_manager(io_manager)
         , m_connection_socket(io_context)
         , m_send_timeout_timer(io_context)
-        , m_settings(settings)
         , m_request_packet(request_packet)
         , m_client_endpoint(requesting_endpoint)
         , m_writer()
@@ -51,24 +50,7 @@ public:
         m_connection_socket.set_option(asio::socket_base::reuse_address(true));
         m_connection_socket.bind(connection_endpoint);
 
-        std::uint16_t error = 0;
-
-        if (m_request_packet->m_filename.find("..") == std::string::npos)
-        {
-            auto path = m_settings->m_root_path;
-            path += '/';
-            path += m_request_packet->m_filename;
-
-            m_writer = stdext::make_unique<file_writer>(path);
-            if (!m_writer->is_open())
-            {
-                std::cerr << "File not found: " << path << std::endl;
-            }
-        }
-        else
-        {
-            std::cerr << "Invalid file path: " << m_request_packet->m_filename << std::endl;
-        }
+        m_writer = m_io_manager.create_writer(m_request_packet->m_filename, m_request_packet->m_mode);
 
         send_first_packet();
     }
@@ -90,8 +72,6 @@ public:
     }
 
 private:
-    static const std::size_t SIZE_DATA_PACKET_HEADER = 4;
-
     void send_first_packet()
     {
         if (!m_writer)
@@ -315,6 +295,8 @@ private:
     }
 
     request_handler& m_handler;
+    io_manager& m_io_manager;
+
     asio::ip::udp::socket m_connection_socket;
     asio::system_timer m_send_timeout_timer;
 
@@ -323,7 +305,7 @@ private:
 
     const asio::ip::udp::endpoint m_client_endpoint;
 
-    std::unique_ptr<file_writer> m_writer;
+    std::unique_ptr<writer> m_writer;
 
     std::uint16_t m_next_expected_packet_id;
 
