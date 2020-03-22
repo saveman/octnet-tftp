@@ -8,13 +8,11 @@
 
 #include "connection.hpp"
 #include "defs.hpp"
-#include "file_io.hpp"
-#include "make_unique.hpp"
+#include "io_manager.hpp"
 #include "packet.hpp"
 #include "packet_builder.hpp"
 #include "packet_parser.hpp"
 #include "request_handler.hpp"
-#include "server_settings.hpp"
 
 namespace oct
 {
@@ -131,7 +129,7 @@ private:
 
     void request_next_receive()
     {
-        m_connection_socket.async_receive_from(asio::buffer(m_in_packet_data), m_received_packet_endpoint,
+        m_connection_socket.async_receive_from(asio::buffer(m_in_packet_data), m_in_packet_endpoint,
             std::bind(&write_connection::on_packet_received, shared_from_base<write_connection>(),
                 std::placeholders::_1, std::placeholders::_2));
     }
@@ -260,9 +258,9 @@ private:
 
         std::cout << "Packet received: " << bytes_received << std::endl;
 
-        if (m_client_endpoint != m_received_packet_endpoint)
+        if (m_client_endpoint != m_in_packet_endpoint)
         {
-            std::cerr << "Received packet from unexpected source: " << ec << std::endl;
+            std::cerr << "Received packet from unexpected source: " << m_in_packet_endpoint << std::endl;
             return;
         }
 
@@ -309,13 +307,13 @@ private:
 
     std::uint16_t m_next_expected_packet_id;
 
-    asio::ip::udp::endpoint m_received_packet_endpoint;
-
     bool m_response_expected;
     int m_retry_counter;
 
     std::vector<std::uint8_t> m_out_packet_data;
+
     std::array<std::uint8_t, MAX_RECV_PACKET_SIZE> m_in_packet_data;
+    asio::ip::udp::endpoint m_in_packet_endpoint;
 };
 
 } // namespace tftp

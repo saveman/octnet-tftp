@@ -57,6 +57,24 @@ private:
 class packet_builder
 {
 public:
+    static std::vector<std::uint8_t> build_packet(const packet_file_req& packet)
+    {
+        std::vector<std::uint8_t> buffer;
+
+        serializer serializer(buffer);
+
+        serializer.write_uint16(packet.m_op);
+        serializer.write_string(packet.m_filename);
+        serializer.write_string(packet.m_mode);
+        for (auto& option : packet.m_options)
+        {
+            serializer.write_string(option.first);
+            serializer.write_string(option.second);
+        }
+
+        return buffer;
+    }
+
     static std::vector<std::uint8_t> build_packet(const packet_data& packet)
     {
         std::vector<std::uint8_t> buffer;

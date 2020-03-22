@@ -17,7 +17,7 @@ namespace net
 namespace tftp
 {
 
-class server_acceptor
+class server_acceptor : public std::enable_shared_from_this<server_acceptor>
 {
 public:
     server_acceptor(asio::io_context& io_context, request_handler& handler)
@@ -39,11 +39,26 @@ public:
         request_receive();
     }
 
+    void stop()
+    {
+        asio::error_code ec;
+
+        if (m_server_socket.is_open())
+        {
+            m_server_socket.close(ec);
+            if (ec)
+            {
+                std::cerr << "Socket close failed: " << ec << std::endl;
+            }
+        }
+    }
+
 private:
     void request_receive()
     {
         m_server_socket.async_receive_from(asio::buffer(m_packet_buffer), m_packet_sender_endpoint,
-            std::bind(&server_acceptor::on_packet_received, this, std::placeholders::_1, std::placeholders::_2));
+            std::bind(&server_acceptor::on_packet_received, shared_from_this(), std::placeholders::_1,
+                std::placeholders::_2));
     }
 
     void on_packet_received(const asio::error_code& ec, std::size_t bytes_received)
