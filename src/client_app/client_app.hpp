@@ -28,19 +28,30 @@ public:
 
     int run()
     {
-        //        auto test_client1 = std::make_shared<client_get>(
-        //            m_io_context, "localhost", 9999, "file1.txt", "testdata/client2.txt", "octet");
+        request this_request;
 
-        auto test_client2 = std::make_shared<client_put>(
-            m_io_context, "localhost", 9999, "fileZ.txt", "testdata/client.txt", "octet");
+        this_request.m_type = request_type::GET;
+        // this_request.m_type = request_type::PUT;
+        this_request.m_host = "localhost";
+        this_request.m_port = 9999;
+        this_request.m_remote_filename = "file1.txt";
+        this_request.m_local_path = "testdata/client2.txt";
+        this_request.m_mode = "octet";
 
         try
         {
             m_signals.async_wait(std::bind(&client_app::on_signal, this, std::placeholders::_1, std::placeholders::_2));
 
-            // m_server->start();
-            //            test_client1->start();
-            test_client2->start();
+            if (this_request.m_type == request_type::GET)
+            {
+                auto test_client1 = std::make_shared<client_get>(m_io_context, this_request);
+                test_client1->start();
+            }
+            else
+            {
+                auto test_client2 = std::make_shared<client_put>(m_io_context, this_request);
+                test_client2->start();
+            }
 
             m_io_context.run();
 

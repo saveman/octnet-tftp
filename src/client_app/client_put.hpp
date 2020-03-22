@@ -12,6 +12,7 @@
 #include "packet.hpp"
 #include "packet_builder.hpp"
 #include "packet_parser.hpp"
+#include "request.hpp"
 #include "string_utils.hpp"
 
 namespace oct
@@ -24,17 +25,12 @@ namespace tftp
 class client_put : public std::enable_shared_from_this<client_put>
 {
 public:
-    client_put(asio::io_context& io_context, const std::string& host, std::uint16_t port,
-        const std::string& remote_filename, const std::string& local_path, const std::string& mode)
+    client_put(asio::io_context& io_context, const request& request)
         : m_io_context(io_context)
         , m_resolver(io_context)
         , m_socket(io_context)
         , m_send_timeout_timer(io_context)
-        , m_host(host)
-        , m_port(port)
-        , m_remote_filename(remote_filename)
-        , m_local_path(local_path)
-        , m_mode(mode)
+        , m_request(request)
         , m_request_complete(false)
         , m_last_sent_packet_id(0)
         , m_response_expected(false)
@@ -66,7 +62,7 @@ public:
         m_socket.set_option(asio::socket_base::reuse_address(true));
         m_socket.bind(connection_endpoint);
 
-        m_resolver.async_resolve(m_host, std::to_string(m_port),
+        m_resolver.async_resolve(m_request.m_host, std::to_string(m_request.m_port),
             std::bind(&client_put::on_resolve_query, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
     }
 
@@ -90,13 +86,13 @@ public:
 private:
     std::unique_ptr<reader> open_reader()
     {
-        if (equal_ignore_case(m_mode, "octet"))
+        if (equal_ignore_case(m_request.m_mode, "octet"))
         {
-            return stdext::make_unique<file_reader>(m_local_path);
+            return stdext::make_unique<file_reader>(m_request.m_local_path);
         }
-        if (equal_ignore_case(m_mode, "netascii"))
+        if (equal_ignore_case(m_request.m_mode, "netascii"))
         {
-            return stdext::make_unique<netascii_reader>(stdext::make_unique<file_reader>(m_local_path));
+            return stdext::make_unique<netascii_reader>(stdext::make_unique<file_reader>(m_request.m_local_path));
         }
         return nullptr;
     }
@@ -116,7 +112,7 @@ private:
 
         if (results.size() == 0)
         {
-            std::cerr << "Cannot resolve address: " << m_host << ':' << m_port << std::endl;
+            std::cerr << "Cannot resolve address: " << m_request.m_host << ':' << m_request.m_port << std::endl;
             return;
         }
 
@@ -129,8 +125,8 @@ private:
     {
         packet_file_req packet;
         packet.m_op = OP_WRQ;
-        packet.m_filename = m_remote_filename;
-        packet.m_mode = m_mode;
+        packet.m_filename = m_request.m_remote_filename;
+        packet.m_mode = m_request.m_mode;
 
         send_packet(packet, true, DEFAULT_RETRY_COUNTER);
     }
@@ -326,11 +322,7 @@ private:
     asio::ip::udp::socket m_socket;
     asio::system_timer m_send_timeout_timer;
 
-    const std::string m_host;
-    const std::uint16_t m_port;
-    const std::string m_remote_filename;
-    const std::string m_local_path;
-    const std::string m_mode;
+    const request m_request;
 
     asio::ip::udp::endpoint m_server_endpoint;
 
