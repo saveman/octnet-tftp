@@ -22,25 +22,43 @@ namespace net
 namespace tftp
 {
 
-class client_get : public std::enable_shared_from_this<client_get>
+class client_put : public std::enable_shared_from_this<client_put>
 {
 public:
-    client_get(asio::io_context& io_context, const request& request)
+    using transfer_handler = std::function<void(bool success)>;
+
+    client_put(asio::io_context& io_context, const request& request, const transfer_handler& transfer_handler)
         : m_io_context(io_context)
         , m_resolver(io_context)
         , m_socket(io_context)
         , m_send_timeout_timer(io_context)
         , m_request(request)
+        , m_transfer_handler(transfer_handler)
         , m_request_complete(false)
-        , m_last_acked_packet_id(0)
+        , m_last_sent_packet_id(0)
         , m_response_expected(false)
         , m_retry_counter(0)
+        , m_last_packet_sent(false)
     {
         // noop
     }
 
     void start()
     {
+        m_reader = open_reader();
+        if (!m_reader)
+        {
+            std::cerr << "cannot create reader" << std::endl;
+            terminate(false);
+            return;
+        }
+        if (!m_reader->is_open())
+        {
+            std::cerr << "cannot open file for reading" << std::endl;
+            terminate(false);
+            return;
+        }
+
         asio::ip::udp::endpoint connection_endpoint(asio::ip::address_v4::any(), 0);
 
         m_socket.open(connection_endpoint.protocol());
@@ -48,7 +66,7 @@ public:
         m_socket.bind(connection_endpoint);
 
         m_resolver.async_resolve(m_request.m_host, std::to_string(m_request.m_port),
-            std::bind(&client_get::on_resolve_query, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
+            std::bind(&client_put::on_resolve_query, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
     }
 
     void stop()
@@ -69,6 +87,19 @@ public:
     }
 
 private:
+    std::unique_ptr<reader> open_reader()
+    {
+        if (equal_ignore_case(m_request.m_mode, "octet"))
+        {
+            return stdext::make_unique<file_reader>(m_request.m_local_path);
+        }
+        if (equal_ignore_case(m_request.m_mode, "netascii"))
+        {
+            return stdext::make_unique<netascii_reader>(stdext::make_unique<file_reader>(m_request.m_local_path));
+        }
+        return nullptr;
+    }
+
     void on_resolve_query(const asio::error_code& ec, asio::ip::udp::resolver::results_type results)
     {
         if (ec == asio::error::operation_aborted)
@@ -96,7 +127,7 @@ private:
     void send_request()
     {
         packet_file_req packet;
-        packet.m_op = OP_RRQ;
+        packet.m_op = OP_WRQ;
         packet.m_filename = m_request.m_remote_filename;
         packet.m_mode = m_request.m_mode;
 
@@ -117,7 +148,7 @@ private:
     {
         m_socket.async_send_to(asio::const_buffer(m_out_packet_data.data(), m_out_packet_data.size()),
             m_server_endpoint,
-            std::bind(&client_get::on_packet_sent, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
+            std::bind(&client_put::on_packet_sent, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
     }
 
     void on_packet_sent(const asio::error_code& ec, std::size_t bytes_transferred)
@@ -141,7 +172,7 @@ private:
         {
             m_send_timeout_timer.expires_after(std::chrono::seconds(DEFAULT_RETRY_TIMEOUT_SEC));
             m_send_timeout_timer.async_wait(
-                std::bind(&client_get::on_send_timeout, shared_from_this(), std::placeholders::_1));
+                std::bind(&client_put::on_send_timeout, shared_from_this(), std::placeholders::_1));
             request_next_receive();
         }
         else
@@ -154,7 +185,7 @@ private:
     {
         m_socket.async_receive_from(asio::buffer(m_in_packet_data), m_in_packet_endpoint,
             std::bind(
-                &client_get::on_packet_received, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
+                &client_put::on_packet_received, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
     }
 
     void on_packet_received(const asio::error_code& ec, std::size_t bytes_received)
@@ -192,8 +223,8 @@ private:
 
         switch (packet->m_op)
         {
-        case OP_DATA:
-            process_data_received(std::static_pointer_cast<packet_data>(packet));
+        case OP_ACK:
+            process_ack_received(std::static_pointer_cast<packet_ack>(packet));
             return;
 
         case OP_ERROR:
@@ -206,83 +237,56 @@ private:
         }
     }
 
-    std::unique_ptr<writer> open_writer()
+    void process_error_received(std::shared_ptr<packet_error> packet)
     {
-        if (equal_ignore_case(m_request.m_mode, "octet"))
-        {
-            return stdext::make_unique<file_writer>(m_request.m_local_path);
-        }
-        if (equal_ignore_case(m_request.m_mode, "netascii"))
-        {
-            return stdext::make_unique<netascii_writer>(stdext::make_unique<file_writer>(m_request.m_local_path));
-        }
-        return nullptr;
+        std::cout << "ERROR received: " << packet->m_error_code << ' ' << packet->m_error_message << std::endl;
+        terminate(false);
     }
 
-    void process_data_received(std::shared_ptr<packet_data> received_packet)
+    void process_ack_received(std::shared_ptr<packet_ack> received_packet)
     {
-        if (m_last_acked_packet_id + 1 != received_packet->m_block_no)
+        if (m_last_sent_packet_id != received_packet->m_block_no)
         {
-            std::cerr << "Unexpected block no: " << received_packet->m_block_no << std::endl;
+            std::cerr << "Unexpected ack no: " << received_packet->m_block_no << std::endl;
             return;
         }
-
-        std::cout << "Received packet: " << received_packet->m_block_no
-                  << " with bytes: " << received_packet->m_data.size() << std::endl;
 
         if (!m_request_complete)
         {
             m_request_complete = true;
             m_server_endpoint = m_in_packet_endpoint;
-
-            m_writer = open_writer();
-            if (!m_writer)
-            {
-                packet_error packet;
-                packet.m_op = OP_ERROR;
-                packet.m_error_code = ERRCODE_UNDEFINED;
-                packet.m_error_message = "cannot open file for writing";
-
-                send_packet(packet, false, 0);
-                return;
-            }
-            if (!m_writer->is_open())
-            {
-                packet_error packet;
-                packet.m_op = OP_ERROR;
-                packet.m_error_code = ERRCODE_ACCESS_VIOLATION;
-                packet.m_error_message = "cannot open file for writing";
-
-                send_packet(packet, false, 0);
-                return;
-            }
         }
 
-        if (!m_writer->write(received_packet->m_data.data(), received_packet->m_data.size()))
+        if (m_last_packet_sent)
+        {
+            terminate(true);
+            return;
+        }
+
+        packet_data packet;
+        packet.m_op = OP_DATA;
+        packet.m_block_no = ++m_last_sent_packet_id;
+        packet.m_data.resize(DEFAULT_DATA_SIZE);
+
+        std::size_t bytes_read = 0;
+        if (!m_reader->read(packet.m_data.data(), packet.m_data.size(), bytes_read))
         {
             packet_error packet;
             packet.m_op = OP_ERROR;
-            packet.m_error_code = ERRCODE_DISK_FULL;
-            packet.m_error_message = "cannot open file for writing";
+            packet.m_error_code = ERRCODE_UNDEFINED;
+            packet.m_error_message = "cannot read data";
 
             send_packet(packet, false, 0);
             return;
         }
+        packet.m_data.resize(bytes_read);
 
-        packet_ack packet;
-        packet.m_op = OP_ACK;
-        packet.m_block_no = received_packet->m_block_no;
+        send_packet(packet, true, DEFAULT_RETRY_COUNTER);
 
-        bool last_packet = (received_packet->m_data.size() < DEFAULT_DATA_SIZE);
-
-        m_last_acked_packet_id = received_packet->m_block_no;
-        send_packet(packet, !last_packet, DEFAULT_RETRY_COUNTER);
-    }
-
-    void process_error_received(std::shared_ptr<packet_error> packet)
-    {
-        std::cout << "ERROR received: " << packet->m_error_code << ' ' << packet->m_error_message << std::endl;
-        terminate(false);
+        if (bytes_read < DEFAULT_DATA_SIZE)
+        {
+            m_last_packet_sent = true;
+        }
     }
 
     void on_send_timeout(const asio::error_code& ec)
@@ -312,7 +316,10 @@ private:
 
     void terminate(bool success)
     {
-        // TODO:
+        if (m_transfer_handler)
+        {
+            m_transfer_handler(success);
+        }
         stop();
     }
 
@@ -322,16 +329,19 @@ private:
     asio::system_timer m_send_timeout_timer;
 
     const request m_request;
+    const transfer_handler m_transfer_handler;
 
     asio::ip::udp::endpoint m_server_endpoint;
 
     bool m_request_complete;
-    std::uint16_t m_last_acked_packet_id;
+    std::uint16_t m_last_sent_packet_id;
 
     bool m_response_expected;
     int m_retry_counter;
 
-    std::unique_ptr<writer> m_writer;
+    bool m_last_packet_sent;
+
+    std::unique_ptr<reader> m_reader;
 
     std::vector<std::uint8_t> m_out_packet_data;
 

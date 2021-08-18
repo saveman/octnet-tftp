@@ -23,18 +23,18 @@ public:
         : m_io_context()
         , m_signals(m_io_context, SIGTERM)
     {
-        // m_server = stdext::make_unique<server>(m_io_context, *m_settings, *m_io_manager);
+        // noop
     }
 
     int run()
     {
         request this_request;
 
-        this_request.m_type = request_type::GET;
-        // this_request.m_type = request_type::PUT;
+        // this_request.m_type = request_type::GET;
+        this_request.m_type = request_type::PUT;
         this_request.m_host = "localhost";
         this_request.m_port = 9999;
-        this_request.m_remote_filename = "file1.txt";
+        this_request.m_remote_filename = "file7.txt";
         this_request.m_local_path = "testdata/client2.txt";
         this_request.m_mode = "octet";
 
@@ -44,12 +44,14 @@ public:
 
             if (this_request.m_type == request_type::GET)
             {
-                auto test_client1 = std::make_shared<client_get>(m_io_context, this_request);
+                auto test_client1 = std::make_shared<client_get>(m_io_context, this_request,
+                    std::bind(&client_app::on_transfer_complete, this, std::placeholders::_1));
                 test_client1->start();
             }
             else
             {
-                auto test_client2 = std::make_shared<client_put>(m_io_context, this_request);
+                auto test_client2 = std::make_shared<client_put>(m_io_context, this_request,
+                    std::bind(&client_app::on_transfer_complete, this, std::placeholders::_1));
                 test_client2->start();
             }
 
@@ -65,6 +67,19 @@ public:
     }
 
 private:
+    void on_transfer_complete(bool success)
+    {
+        if (success)
+        {
+            std::cout << "File transfered!" << std::endl;
+        }
+        else
+        {
+            std::cerr << "Transfer failed!" << std::endl;
+        }
+        m_io_context.stop();
+    }
+
     void on_signal(const asio::error_code& ec, int signal_number)
     {
         if (ec)

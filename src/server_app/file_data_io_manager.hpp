@@ -2,8 +2,8 @@
 
 #include <iostream>
 
+#include "../server/data_io_manager.hpp"
 #include "file_io.hpp"
-#include "io_manager.hpp"
 #include "make_unique.hpp"
 #include "netascii_io.hpp"
 #include "string_utils.hpp"
@@ -15,17 +15,17 @@ namespace net
 namespace tftp
 {
 
-class default_io_manager : public io_manager
+class file_data_io_manager : public data_io_manager
 {
 public:
-    default_io_manager(const std::string& root_path)
-        : io_manager()
+    file_data_io_manager(const std::string& root_path)
+        : data_io_manager()
         , m_root_path(root_path)
     {
         // noop
     }
 
-    std::unique_ptr<reader> create_reader(const std::string& filename, const std::string& mode) final
+    std::unique_ptr<reader> create_reader(const std::string& filename) final
     {
         if (filename.find("..") != std::string::npos)
         {
@@ -37,7 +37,7 @@ public:
         path += '/';
         path += filename;
 
-        auto reader = open_reader(path, mode);
+        auto reader = stdext::make_unique<file_reader>(path);
         if (!reader)
         {
             std::cerr << "Open failed: " << path << std::endl;
@@ -49,7 +49,7 @@ public:
         return reader;
     }
 
-    std::unique_ptr<writer> create_writer(const std::string& filename, const std::string& mode) final
+    std::unique_ptr<writer> create_writer(const std::string& filename) final
     {
         if (filename.find("..") != std::string::npos)
         {
@@ -61,7 +61,7 @@ public:
         path += '/';
         path += filename;
 
-        auto writer = open_writer(path, mode);
+        auto writer = stdext::make_unique<file_writer>(path);
         if (!writer)
         {
             std::cerr << "Open failed: " << path << std::endl;
@@ -75,33 +75,7 @@ public:
     }
 
 private:
-    std::unique_ptr<reader> open_reader(const std::string& path, const std::string& mode)
-    {
-        if (equal_ignore_case(mode, "octet"))
-        {
-            return stdext::make_unique<file_reader>(path);
-        }
-        if (equal_ignore_case(mode, "netascii"))
-        {
-            return stdext::make_unique<netascii_reader>(stdext::make_unique<file_reader>(path));
-        }
-        return nullptr;
-    }
-
-    std::unique_ptr<writer> open_writer(const std::string& path, const std::string& mode)
-    {
-        if (equal_ignore_case(mode, "octet"))
-        {
-            return stdext::make_unique<file_writer>(path);
-        }
-        if (equal_ignore_case(mode, "netascii"))
-        {
-            return stdext::make_unique<netascii_writer>(stdext::make_unique<file_writer>(path));
-        }
-        return nullptr;
-    }
-
-    const std::string& m_root_path;
+    std::string m_root_path;
 };
 
 } // namespace tftp

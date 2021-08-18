@@ -27,7 +27,7 @@ target_sources(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME} PRIVATE 3rdparty::asio)
 target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
 target_link_libraries(${PROJECT_NAME} PRIVATE octnet-tftp-libcommon)
-#target_link_libraries(${PROJECT_NAME} PRIVATE octnet-tftp-libclient)
+target_link_libraries(${PROJECT_NAME} PRIVATE octnet-tftp-libclient)
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
 

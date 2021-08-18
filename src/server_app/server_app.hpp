@@ -6,7 +6,8 @@
 
 #include <asio.hpp>
 
-#include "default_io_manager.hpp"
+#include "default_mode_io_manager.hpp"
+#include "file_data_io_manager.hpp"
 #include "server.hpp"
 
 namespace oct
@@ -24,7 +25,11 @@ public:
         , m_signals(m_io_context, SIGTERM)
     {
         m_settings = create_settings();
-        m_io_manager = create_io_manager(*m_settings);
+
+        m_data_io_manager = stdext::make_unique<file_data_io_manager>(m_settings->m_root_path);
+        m_mode_io_manager = stdext::make_unique<default_mode_io_manager>();
+        m_io_manager = stdext::make_unique<io_manager>(*m_data_io_manager, *m_mode_io_manager);
+
         m_server = stdext::make_unique<server>(m_io_context, *m_settings, *m_io_manager);
     }
 
@@ -75,15 +80,12 @@ private:
         return settings;
     }
 
-    static std::unique_ptr<io_manager> create_io_manager(server_settings& settings)
-    {
-        return stdext::make_unique<default_io_manager>(settings.m_root_path);
-    }
-
     asio::io_context m_io_context;
     asio::signal_set m_signals;
 
     std::unique_ptr<server_settings> m_settings;
+    std::unique_ptr<data_io_manager> m_data_io_manager;
+    std::unique_ptr<mode_io_manager> m_mode_io_manager;
     std::unique_ptr<io_manager> m_io_manager;
     std::unique_ptr<server> m_server;
 };

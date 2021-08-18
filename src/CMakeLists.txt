@@ -7,7 +7,7 @@ project(octnet-tftpd
 )
 
 add_subdirectory(common)
-#add_subdirectory(client)
+add_subdirectory(client)
 add_subdirectory(server)
 add_subdirectory(server_app)
 add_subdirectory(client_app)

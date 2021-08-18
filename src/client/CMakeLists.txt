@@ -20,16 +20,9 @@ target_include_directories(${PROJECT_NAME}
 
 target_sources(${PROJECT_NAME}
     INTERFACE
-        defs.hpp
-        deserializer.hpp
-        file_io.hpp
-        io.hpp
-        make_unique.hpp
-        netascii_io.hpp
-        packet_builder.hpp
-        packet_parser.hpp
-        packet.hpp
-        string_utils.hpp
+        client_get.hpp
+        client_put.hpp
+        request.hpp
 )
 
 target_link_libraries(${PROJECT_NAME} INTERFACE 3rdparty::asio)
